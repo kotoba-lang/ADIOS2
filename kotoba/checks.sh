@@ -4,8 +4,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Compile the Kotoba v1 ADIOS2/BP identification-field module with CLI 0.7.2.
-# The fixture file is 64 bytes; the module special-cases bytes 0-7 and 36-39.
+# Compile the Kotoba v1 ADIOS2/BP identification-field module with CLI 0.7.3.
+# The fixture file is 64 bytes; the module parses bytes 0-7 and 36-39 from
+# packed little-endian i64 words. run_wasm.mjs feeds the fixture file's bytes
+# to the compiled module and asserts every field against the file.
 # Owner constraint: magic/header only — no engine, writer, or timestep/query.
 # Do not invent a pass: every gate reads the fixture file, a compiler receipt,
 # or a runtime value. A local runtime value is not a CI result.
@@ -16,12 +18,11 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 MODULE="${ROOT}/adios2.kotoba"
 FIXTURE="${ROOT}/fixtures/bp5-index-header.bin"
 EXPECTED_HEX="4144494f532d42502076322e312e3020496e646578205461626c65000000000032313000000502006e0004030201000000000000000000000000000000000000"
-EXPECTED_VALUE="110520"
 
-KOTOBA_VERSION="0.7.2"
+KOTOBA_VERSION="0.7.3"
 KOTOBA_TARBALL="kotoba-linux-amd64.tar.gz"
 KOTOBA_URL="https://github.com/kotoba-lang/kotoba/releases/download/v${KOTOBA_VERSION}/${KOTOBA_TARBALL}"
-KOTOBA_SHA256="95e225461e1b8a21849b251e8c8b654693d2c8a516b258532771651e978e1977"
+KOTOBA_SHA256="6b14c81619cf019feed5ca8a295fb27db34883bbaca4a547e98a3db398e2e058"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -37,13 +38,13 @@ need_cmd curl
 need_cmd tar
 need_cmd sha256sum
 need_cmd grep
+need_cmd node
 
 [[ -f "${MODULE}" ]] || fail "missing module ${MODULE}"
 [[ -f "${FIXTURE}" ]] || fail "missing fixture ${FIXTURE}"
 
-python3 - "${FIXTURE}" "${MODULE}" "${EXPECTED_HEX}" <<'PY'
+EXPECTED_VALUE="$(python3 - "${FIXTURE}" "${MODULE}" "${EXPECTED_HEX}" <<'PY'
 import pathlib
-import re
 import sys
 
 fixture = pathlib.Path(sys.argv[1]).read_bytes()
@@ -77,41 +78,15 @@ for line in module_text.splitlines():
 if comment != expected_hex:
     raise SystemExit(f"module fixture comment {comment!r}, expected {expected_hex}")
 
-wanted = {
-    "header-len": "64",
-    "magic-0": "65",
-    "magic-1": "68",
-    "magic-2": "73",
-    "magic-3": "79",
-    "magic-4": "83",
-    "magic-5": "45",
-    "magic-6": "66",
-    "magic-7": "80",
-    "endian-flag": "0",
-    "bp-version": "5",
-    "bp-minor": "2",
-    "active-flag": "0",
-}
-for name, lit in wanted.items():
-    if not re.search(rf"\(defn {name} \[\] {lit}\)", module_text):
-        raise SystemExit(f"module is missing (defn {name} [] {lit})")
-
-magic = bytes(int(wanted[f"magic-{i}"]) for i in range(8))
-if magic != fixture[:8]:
-    raise SystemExit(f"module magic literals {magic!r} != fixture {fixture[:8]!r}")
-if int(wanted["endian-flag"]) != fixture[36]:
-    raise SystemExit("module endian-flag does not match fixture byte 36")
-if int(wanted["bp-version"]) != fixture[37]:
-    raise SystemExit("module bp-version does not match fixture byte 37")
-if int(wanted["bp-minor"]) != fixture[38]:
-    raise SystemExit("module bp-minor does not match fixture byte 38")
-if int(wanted["active-flag"]) != fixture[39]:
-    raise SystemExit("module active-flag does not match fixture byte 39")
-
+# Expected packed value derived from the fixture bytes (not a literal).
+le = 1 if fixture[36] == 0 else 0
 print(
-    "fixture: 64-byte ADIOS-BP Index Table, LE, BP 5.2, active=0; module literals match"
+    "fixture: 64-byte ADIOS-BP Index Table, LE, BP 5.2, active=0", file=sys.stderr
 )
+print(100000 + le * 10000 + fixture[37] * 100 + fixture[38] * 10 + fixture[39])
 PY
+)" || fail "fixture check failed"
+echo "expected packed value (from fixture bytes): ${EXPECTED_VALUE}"
 
 if [[ -n "${KOTOBA_BIN:-}" ]]; then
   KOTOBA="${KOTOBA_BIN}"
@@ -214,5 +189,8 @@ if value != expected:
     raise SystemExit(f"runtime value {value!r}, expected {expected}")
 print(f"run result: {value}")
 PY
+
+echo "instantiate ${WASM} and check parse exports against ${FIXTURE}"
+node "${ROOT}/run_wasm.mjs" "${WASM}" "${FIXTURE}" || fail "wasm fixture checks failed"
 
 echo "PASS: Kotoba v1 ADIOS2/BP5 header fields ${EXPECTED_VALUE}"
