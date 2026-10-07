@@ -23,7 +23,6 @@ on:
       - 'kotoba/**'
       - '.github/workflows/kotoba.yml'
       - '.github/workflows/reuse.yml'
-      - '.github/workflows/pypackaging.yml'
       - '.github/workflows/everything.yml'
   push:
     branches:
@@ -35,7 +34,6 @@ on:
       - 'kotoba/**'
       - '.github/workflows/kotoba.yml'
       - '.github/workflows/reuse.yml'
-      - '.github/workflows/pypackaging.yml'
       - '.github/workflows/everything.yml'
   release:
     types:

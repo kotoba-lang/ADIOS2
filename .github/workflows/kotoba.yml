@@ -5,7 +5,8 @@
 # Fork-only Kotoba header checks. Path-filtered to kotoba/** so this
 # workflow is the one that runs for this tree. reuse.yml, pypackaging.yml,
 # and everything.yml (git_checks) path-ignore the same kotoba paths so a
-# kotoba-only PR does not enqueue those jobs.
+# kotoba-only PR does not enqueue those jobs. None of them ignores its own
+# workflow file, so editing a workflow still runs that workflow.
 
 name: Kotoba v1
 

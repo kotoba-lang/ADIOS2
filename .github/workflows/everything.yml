@@ -40,7 +40,6 @@ on:
       - '.github/workflows/kotoba.yml'
       - '.github/workflows/reuse.yml'
       - '.github/workflows/pypackaging.yml'
-      - '.github/workflows/everything.yml'
   pull_request:
     branches:
       - master
@@ -50,7 +49,6 @@ on:
       - '.github/workflows/kotoba.yml'
       - '.github/workflows/reuse.yml'
       - '.github/workflows/pypackaging.yml'
-      - '.github/workflows/everything.yml'
 
 permissions:
   contents: read
