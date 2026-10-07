@@ -3,8 +3,14 @@
 ;; SPDX-License-Identifier: Apache-2.0
 
 ;; Honest Kotoba v1 ADIOS2/BP binding: identification fields only.
-;; Fixture file is 64 bytes; this module special-cases bytes 0-7 and 36-39.
-;; Every other fixture-byte index returns 0. Rest of the file is not parsed.
+;;
+;; The parse functions take the header bytes as input and derive every field
+;; from them. Kotoba CLI v0.7.3 wasm32 is i64-only (no IEEE floats, no
+;; nonempty bytes builtin), so the header is passed as little-endian i64
+;; words: w0 = bytes 0-7, w4 = bytes 32-39. That covers every field below.
+;; Other bytes of the 64-byte header (VersionTag tail, library digits, UUID,
+;; padding) are not parsed.
+;;
 ;; Vendored fixture bytes (hex): 4144494f532d42502076322e312e3020496e646578205461626c65000000000032313000000502006e0004030201000000000000000000000000000000000000
 ;; Identification fields from source/adios2/engine/bp5/BP5Engine.h:
 ;;   bytes  0-7  magic "ADIOS-BP"
@@ -15,72 +21,83 @@
 ;; Owner constraint: magic/header or one record. No I/O engine, no BP writer,
 ;; no timestep/query. i64-v1, wasm32, no FFI, no IEEE floats.
 
-(ns adios2.header)
+(ns adios2.header
+  (:export [main
+            header-len word-byte header-byte
+            magic-ok endian-flag little-endian? bp-version bp-minor active-flag
+            pack
+            fixture-w0 fixture-w4]))
 
-(defn header-len [] 64)
+(defn header-len [] :i64 64)
 
-(defn magic-0 [] 65)
-(defn magic-1 [] 68)
-(defn magic-2 [] 73)
-(defn magic-3 [] 79)
-(defn magic-4 [] 83)
-(defn magic-5 [] 45)
-(defn magic-6 [] 66)
-(defn magic-7 [] 80)
-(defn endian-flag [] 0)
-(defn bp-version [] 5)
-(defn bp-minor [] 2)
-(defn active-flag [] 0)
+;; fixtures/bp5-index-header.bin packed as little-endian i64 words.
+;; kotoba/run_wasm.mjs re-packs the fixture file and fails if these drift.
+(defn fixture-w0 [] :i64 5783234707332875329)
+(defn fixture-w4 [] :i64 568447514718514)
 
-(defn fixture-byte [i]
-  (if (= i 0) (magic-0)
-  (if (= i 1) (magic-1)
-  (if (= i 2) (magic-2)
-  (if (= i 3) (magic-3)
-  (if (= i 4) (magic-4)
-  (if (= i 5) (magic-5)
-  (if (= i 6) (magic-6)
-  (if (= i 7) (magic-7)
-  (if (= i 36) (endian-flag)
-  (if (= i 37) (bp-version)
-  (if (= i 38) (bp-minor)
-  (if (= i 39) (active-flag)
-  0)))))))))))))
+(defn p256 [p :i64] :i64
+  (if (< p 1) 1
+    (if (< p 2) 256
+      (if (< p 3) 65536
+        (if (< p 4) 16777216
+          (if (< p 5) 4294967296
+            (if (< p 6) 1099511627776
+              (if (< p 7) 281474976710656
+                72057594037927936))))))))
 
-(defn magic-ok []
-  (if (= (fixture-byte 0) 65)
-    (if (= (fixture-byte 1) 68)
-      (if (= (fixture-byte 2) 73)
-        (if (= (fixture-byte 3) 79)
-          (if (= (fixture-byte 4) 83)
-            (if (= (fixture-byte 5) 45)
-              (if (= (fixture-byte 6) 66)
-                (if (= (fixture-byte 7) 80) 1 0)
-                0)
-              0)
-            0)
-          0)
-        0)
-      0)
+;; Byte p (0-7) of a non-negative little-endian i64 word. A word whose top
+;; byte is >= 0x80 is negative in i64 and is rejected by the callers below.
+(defn word-byte [word :i64 p :i64] :i64
+  (let [q (quot word (p256 p))]
+    (- q (* (quot q 256) 256))))
+
+;; Header byte i from words w0 (bytes 0-7) and w4 (bytes 32-39).
+;; Returns -1 for an offset this binding does not parse.
+(defn header-byte [w0 :i64 w4 :i64 i :i64] :i64
+  (if (< i 0)
+    -1
+    (if (< i 8)
+      (word-byte w0 i)
+      (if (< i 32)
+        -1
+        (if (< i 40)
+          (word-byte w4 (- i 32))
+          -1)))))
+
+;; "ADIOS-BP" = 65 68 73 79 83 45 66 80.
+(defn magic-ok [w0 :i64] :i64
+  (if (and (>= w0 0)
+           (and (= (word-byte w0 0) 65)
+                (and (= (word-byte w0 1) 68)
+                     (and (= (word-byte w0 2) 73)
+                          (and (= (word-byte w0 3) 79)
+                               (and (= (word-byte w0 4) 83)
+                                    (and (= (word-byte w0 5) 45)
+                                         (and (= (word-byte w0 6) 66)
+                                              (= (word-byte w0 7) 80)))))))))
+    1
     0))
 
-(defn little-endian? []
-  (if (zero? (fixture-byte 36)) 1 0))
+(defn endian-flag [w4 :i64] :i64 (word-byte w4 4))
+(defn bp-version [w4 :i64] :i64 (word-byte w4 5))
+(defn bp-minor [w4 :i64] :i64 (word-byte w4 6))
+(defn active-flag [w4 :i64] :i64 (word-byte w4 7))
 
-(defn pack []
-  (+ (* (magic-ok) 100000)
-     (* (little-endian?) 10000)
-     (* (fixture-byte 37) 100)
-     (* (fixture-byte 38) 10)
-     (fixture-byte 39)))
+(defn little-endian? [w4 :i64] :i64
+  (if (= (endian-flag w4) 0) 1 0))
 
-(defn main []
-  (if (= (header-len) 64)
-    (if (= (magic-ok) 1)
-      (if (= (fixture-byte 37) 5)
-        (if (= (fixture-byte 38) 2)
-          (pack)
-          0)
-        0)
-      0)
+;; Packed identification fields, or 0 when the header is not a BP5 index
+;; header (bad magic, negative w4, or BP major version other than 5).
+(defn pack [w0 :i64 w4 :i64] :i64
+  (if (and (= (magic-ok w0) 1)
+           (and (>= w4 0)
+                (= (bp-version w4) 5)))
+    (+ (* (magic-ok w0) 100000)
+       (+ (* (little-endian? w4) 10000)
+          (+ (* (bp-version w4) 100)
+             (+ (* (bp-minor w4) 10)
+                (active-flag w4)))))
     0))
+
+(defn main [] :i64
+  (pack (fixture-w0) (fixture-w4)))
