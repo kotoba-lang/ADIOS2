@@ -472,7 +472,8 @@ jobs:
           name: ci-docker ${{ matrix.baseos }} ${{ github.sha }}
           path: ci-docker.tar
       - name: Push image to Docker Hub
-        if: github.event_name == 'push'
+        # Upstream registries only: forks lack the credentials/scopes to push.
+        if: github.event_name == 'push' && github.repository == 'ornladios/ADIOS2'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -533,7 +534,8 @@ jobs:
           name: ci-apptainer ${{ matrix.baseos }} ${{ github.sha }}
           path: adios2-ci.sif
       - name: Push image to GHCR
-        if: github.event_name == 'push'
+        # Upstream registries only: forks lack the credentials/scopes to push.
+        if: github.event_name == 'push' && github.repository == 'ornladios/ADIOS2'
         run: |
             apptainer remote login \
                 --username="${{ github.actor }}" \
